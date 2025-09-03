@@ -1,0 +1,75 @@
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CurrentRooms = workspace:WaitForChild("CurrentRooms")
+local latestRoomValue = ReplicatedStorage:WaitForChild("GameData"):WaitForChild("LatestRoom")
+
+local function spawnModel()
+    local m = game:GetObjects("rbxassetid://112716996528031")[1]
+    m.Parent = workspace
+    if not m.PrimaryPart then
+        m.PrimaryPart = m:FindFirstChildWhichIsA("BasePart")
+    end
+    return m
+end
+
+local models = {spawnModel(), spawnModel()}
+local speed, targetPos, arrived, stuckTime, flightCount = 35, nil, false, 0, 0
+local maxFlights, maxStuckTime = 6, 2
+
+local function getDoorPos(room)
+    if not room then return nil end
+    local door = room:FindFirstChild("Door")
+    if not door then return nil end
+    local target = door:IsA("Model") and (door.PrimaryPart or door:FindFirstChildWhichIsA("BasePart")) or door
+    if target then return target.Position + Vector3.new(0, 3, 0) end
+end
+
+local function updateRoom()
+    if flightCount >= maxFlights then return end
+    local id = latestRoomValue.Value
+    local prevRoom = CurrentRooms:FindFirstChild(tostring(id - 1))
+    local currentRoom = CurrentRooms:FindFirstChild(tostring(id))
+    local prevPos, currPos = getDoorPos(prevRoom), getDoorPos(currentRoom)
+    if prevPos and currPos then
+        for _, m in ipairs(models) do
+            m:SetPrimaryPartCFrame(CFrame.new(prevPos, currPos))
+        end
+        targetPos, arrived, stuckTime = currPos, false, 0
+        flightCount += 1
+    end
+end
+
+RunService.Heartbeat:Connect(function(dt)
+    if arrived or not targetPos or flightCount > maxFlights then return end
+    for _, m in ipairs(models) do
+        local currentPos = m.PrimaryPart.Position
+        local direction = (targetPos - currentPos)
+        local dist = direction.Magnitude
+        if dist < 4 then
+            arrived = true
+            return
+        end
+        local moveStep, dirUnit = math.min(dist, speed * dt), direction.Unit
+        local rayParams = RaycastParams.new()
+        rayParams.FilterDescendantsInstances = {m}
+        rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+        local rayResult = workspace:Raycast(currentPos, dirUnit * 4, rayParams)
+        if rayResult then
+            local right = Vector3.new(dirUnit.Z, 0, -dirUnit.X)
+            local newPos = currentPos + right * moveStep
+            m:SetPrimaryPartCFrame(CFrame.lookAt(newPos, targetPos))
+            stuckTime += dt
+            if stuckTime >= maxStuckTime then
+                local bypassPos = currentPos + dirUnit * moveStep
+                m:SetPrimaryPartCFrame(CFrame.lookAt(bypassPos, targetPos))
+            end
+        else
+            local newPos = currentPos + dirUnit * moveStep
+            m:SetPrimaryPartCFrame(CFrame.lookAt(newPos, targetPos))
+            stuckTime = 0
+        end
+    end
+end)
+
+latestRoomValue:GetPropertyChangedSignal("Value"):Connect(updateRoom)
+updateRoom()
